@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, fields
 from typing import Any, ClassVar, Dict, List, Protocol, Sequence, TypeVar, cast, get_args, get_origin, runtime_checkable
 
 from pydantic import BaseModel
+from google.protobuf import message, symbol_database as _symbol_database
 
 from autogen_core.base._type_helpers import is_union
 
@@ -89,6 +90,7 @@ def has_nested_base_model_in_type(tp: Any) -> bool:
 
 DataclassT = TypeVar("DataclassT", bound=IsDataclass)
 
+PROTOBUF_DATA_CONTENT_TYPE = "application/x-protobuf"
 JSON_DATA_CONTENT_TYPE = "application/json"
 
 
@@ -142,6 +144,22 @@ class PydanticJsonMessageSerializer(MessageSerializer[PydanticT]):
     def serialize(self, message: PydanticT) -> bytes:
         return message.model_dump_json().encode("utf-8")
 
+class ProtobufMessageSerializer(MessageSerializer[message.Message]):
+    @property
+    def data_content_type(self) -> str:
+        return PROTOBUF_DATA_CONTENT_TYPE
+
+    @property
+    def type_name(self) -> str:
+        return _type_name(self.cls)
+
+    def deserialize(self, payload: bytes) -> message.Message:
+        type_class = _sym_db.GetSymbol(self.type_name)
+        return type_class.FromString(payload)
+
+    def serialize(self, message: message.Message) -> bytes:
+        return message.SerializeToString()
+
 
 @dataclass
 class UnknownPayload:
@@ -161,10 +179,11 @@ V = TypeVar("V")
 
 
 def try_get_known_serializers_for_type(cls: type[Any]) -> list[MessageSerializer[Any]]:
-    # TODO: Support protobuf types
     serializers: List[MessageSerializer[Any]] = []
     if issubclass(cls, BaseModel):
         serializers.append(PydanticJsonMessageSerializer(cls))
+    elif issubclass(cls, message.Message):
+        serializers.append(ProtobufMessageSerializer(cls))
     elif isinstance(cls, IsDataclass):
         serializers.append(DataclassJsonMessageSerializer(cls))
 
