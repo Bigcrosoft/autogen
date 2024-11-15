@@ -8,11 +8,13 @@ from autogen_core.base import (
     SerializationRegistry,
     try_get_known_serializers_for_type,
 )
-from autogen_core.base._serialization import DataclassJsonMessageSerializer, PydanticJsonMessageSerializer
+from autogen_core.base._serialization import DataclassJsonMessageSerializer, PydanticJsonMessageSerializer, ProtoMessageSerializer
 from autogen_core.components import Image
 from PIL import Image as PILImage
 from pydantic import BaseModel
-
+from google.protobuf.message import Message
+from google.protobuf.descriptor import Descriptor
+from google.protobuf.descriptor_pool import Default
 
 class PydanticMessage(BaseModel):
     message: str
@@ -159,3 +161,24 @@ def test_image_type() -> None:
     assert deserialized.image.image.size == (100, 100)
     assert deserialized.image.image.mode == "RGB"
     assert deserialized.image.image == image.image
+
+
+class TestProtoMessage(Message):
+    DESCRIPTOR: Descriptor = Default().AddSerializedFile(b'\n\x0ctest.proto\x12\x04test\"\x1a\n\x0cTestProtoMessage\x12\n\n\x02id\x18\x01 \x01(\t')
+
+    def __init__(self, id: str = "") -> None:
+        super().__init__()
+        self.id = id
+
+
+def test_proto_message_serializer() -> None:
+    serde = SerializationRegistry()
+    serde.add_serializer(ProtoMessageSerializer(TestProtoMessage))
+
+    message = TestProtoMessage(id="123")
+    name = serde.type_name(message)
+    serialized = serde.serialize(message, type_name=name, data_content_type="application/protobuf")
+    deserialized = serde.deserialize(serialized, type_name=name, data_content_type="application/protobuf")
+
+    assert isinstance(deserialized, TestProtoMessage)
+    assert deserialized.id == "123"

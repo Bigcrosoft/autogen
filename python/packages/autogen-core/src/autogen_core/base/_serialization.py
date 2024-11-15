@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, fields
 from typing import Any, ClassVar, Dict, List, Protocol, Sequence, TypeVar, cast, get_args, get_origin, runtime_checkable
 
 from pydantic import BaseModel
+from google.protobuf.message import Message  # Importing the Message class from protobuf
 
 from autogen_core.base._type_helpers import is_union
 
@@ -143,6 +144,27 @@ class PydanticJsonMessageSerializer(MessageSerializer[PydanticT]):
         return message.model_dump_json().encode("utf-8")
 
 
+class ProtoMessageSerializer(MessageSerializer[Message]):
+    def __init__(self, cls: type[Message]) -> None:
+        self.cls = cls
+
+    @property
+    def data_content_type(self) -> str:
+        return "application/protobuf"
+
+    @property
+    def type_name(self) -> str:
+        return _type_name(self.cls)
+
+    def deserialize(self, payload: bytes) -> Message:
+        message = self.cls()
+        message.ParseFromString(payload)
+        return message
+
+    def serialize(self, message: Message) -> bytes:
+        return message.SerializeToString()
+
+
 @dataclass
 class UnknownPayload:
     type_name: str
@@ -161,19 +183,19 @@ V = TypeVar("V")
 
 
 def try_get_known_serializers_for_type(cls: type[Any]) -> list[MessageSerializer[Any]]:
-    # TODO: Support protobuf types
     serializers: List[MessageSerializer[Any]] = []
     if issubclass(cls, BaseModel):
         serializers.append(PydanticJsonMessageSerializer(cls))
     elif isinstance(cls, IsDataclass):
         serializers.append(DataclassJsonMessageSerializer(cls))
+    elif issubclass(cls, Message):
+        serializers.append(ProtoMessageSerializer(cls))
 
     return serializers
 
 
 class SerializationRegistry:
     def __init__(self) -> None:
-        # type_name, data_content_type -> serializer
         self._serializers: dict[tuple[str, str], MessageSerializer[Any]] = {}
 
     def add_serializer(self, serializer: MessageSerializer[Any] | Sequence[MessageSerializer[Any]]) -> None:
